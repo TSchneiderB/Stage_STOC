@@ -1,0 +1,201 @@
+---
+title: "Map_France_STOC_Observation"
+author: "Thomas Schneider--Bruchon"
+date: "25/03/2020"
+---
+
+# Environment # 
+```{r}
+library(sf)
+library(maps)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+```
+
+
+# Function #
+```{r}
+# Function use in the function "France_map"
+# Returns a map of France of a considered species according to the passage and the year
+observation <- function(species, observation_data, inventaire_data, comparison_table, table_point, area_table, passage,year){
+    
+    #get the species distribution area
+    try(area <- area_table %>%
+    filter(SCINAME %in% species), silent = T)
+  
+    if(length(area)<1){
+      return(paste("Error,",species,"is not in the area table: ", area_table))
+    }
+    
+  
+    #get species code
+    try(row <- comparison_table %>%
+    filter(SCINAME %in% species), silent = T)
+    sp_code <- as.character(row$pk_species)
+    
+    if(length(sp_code)<1){
+      return(paste("Error,",species," is not in the comparison table: ", comparison_table))
+    }
+    
+    
+    #get the points id
+    try(row <- observation_data %>%
+    filter(espece %in% sp_code), silent = T)
+    id_point_ob <- row$id_point
+    
+    if(length(id_point_ob)<1){
+      return(paste("Error,",sp_code,"is not in the observation data table: ", observation_data))
+    }
+    
+    
+    #get all the points coordinates
+    try(row <- inventaire_data %>%
+    filter(id_point %in% id_point_ob), silent = T)
+    id_point_p <- row$id_point
+    
+    
+    #get the passages 
+    passage_ob <- row$passage
+        
+    
+    #get the years
+    date <- row$date
+    date <- as.Date(date)
+    year_ob <- year(date)
+    
+    
+    id_point_p1 <- c()  #list coordinates passage 1
+    id_point_p2 <- c()  #list coordinates passage 2
+    
+    
+    #selection by year
+    for(i in 1:length(id_point_p)){
+      if(year == "all"){
+        if(passage_ob[i] == 1){
+          id_point_p1 <- c(id_point_p1, as.character(id_point_p[i])) 
+        }
+        if(passage_ob[i] == 2){
+          id_point_p2 <- c(id_point_p2, as.character(id_point_p[i])) 
+        }
+      }
+      else{
+        if(year_ob[i] == year){
+          if(passage_ob[i] == 1){
+            id_point_p1 <- c(id_point_p1, as.character(id_point_p[i])) 
+          }
+          if(passage_ob[i] == 2){
+            id_point_p2 <- c(id_point_p2, as.character(id_point_p[i])) 
+          }
+        }
+      }
+    }
+    
+    
+    #selection by passage
+    if(passage == "all"){
+      try(cor_pt_1 <- table_point %>%
+      filter(pk_point %in% id_point_p1))
+      
+      try(cor_pt_2 <- table_point %>%
+      filter(pk_point %in% id_point_p2))
+    }
+    else{
+      if(passage == 1){
+        try(cor_pt_1 <- table_point %>%
+        filter(pk_point %in% id_point_p1))
+        cor_pt_2 <- NULL
+      }
+      if(passage == 2){
+        try(cor_pt_2 <- table_point %>%
+        filter(pk_point %in% id_point_p2))
+        cor_pt_1 = NULL
+      }
+    }
+    
+    
+    #map creation
+    #legend creation
+    description <- c("1"="Resident", "2"="Breeding Season", "3"="Non-breeding Season", "4"="Passage")
+    colors <- c("1"="darkmagenta", "2"="firebrick1", "3"="deepskyblue2", "4"="gold")
+    
+    #background map
+    monde <- map_data("world")
+    
+    #mapping
+    map <- ggplot()+
+      geom_polygon(data=monde, aes(x=long, y=lat, group=group), fill="papayawhip", col="black")+
+      geom_sf(data=area, aes(fill=factor(SEASONAL)), alpha=0.4)+
+      geom_point(data=cor_pt_1, aes(x=longitude_wgs84, y=latitude_wgs84), col="whitesmoke", size=2)+
+      geom_point(data=cor_pt_2, aes(x=longitude_wgs84, y=latitude_wgs84), col="gray1", size=0.7)
+    
+    #adjustments
+    map + 
+      scale_fill_manual(values=colors, name=NULL, labels=description)+
+      coord_sf(xlim = c(-10,10), ylim = c(40,55))+
+      guides(alpha="none")+
+      theme_void()+
+      labs(title = paste("Aire de répartition de",species,""), caption="based on BirdLife & STOC-eps data")+
+      theme(panel.background = element_rect(fill="slategray1"), plot.title = element_text(color="#063376", hjust=0.5, vjust=3), plot.caption = element_text(face="bold", vjust=1), legend.margin = margin(0,0,0,1,"cm"))
+    
+
+    #END
+}
+
+
+#Function that creates the France_map for one species thanks to the observation function
+#Need : the path where the different tables are saved
+#       the species you want (Latin)
+#       the passage you want ("1, 2, all")
+#       the year you want (format: "0000")
+France_map <- function(data_path, species, passage, year){
+  
+  if(!exists("observation_STOC")){
+    print("load observation_STOC")
+    load(paste(path,"observation_STOC.Rda", sep = ""))
+  }
+  
+   if(!exists("espece_BL_STOC")){
+    print("load espece_BL_STOC.Rda")
+    load(paste(path,"espece_BL_STOC.Rda", sep = ""))
+   }
+   
+  if(!exists("Point_obs_STOC")){
+    print("load Point_obs_STOC.Rda")
+    load(paste(path,"Point_obs_STOC.Rda", sep = ""))
+   }
+   
+  if(!exists("BL_all_polygons_F")){
+    print("load BL_all_polygons_F.Rda")
+    load(paste(path,"BL_all_polygons_F.Rda", sep = ""))
+  }
+
+  #Use of the observation function create upstream
+  observation(species, observation_STOC, inventaire_stoc, espece_BL_STOC, Point_obs_STOC, BL_all_polygons_F, passage,year)
+} 
+```
+
+
+# Argument #
+```{r}
+#Example of possibles arguments
+data_path = "/Users/Schneider/STAGE_STOC_MNHN/Donnees/"
+species = "Saxicola rubetra"
+passage = 'all'
+year = "all"
+```
+
+
+# Execution # 
+```{r}
+France_map(data_path,species,passage,year)
+```
+
+
+# Save #
+```{r}
+#Save the last created map
+save_path = "/Users/Schneider/STAGE_STOC_MNHN/Cartes/"
+ggsave(paste(save_path,species,"_",passage,"_",year,".png", sep = ""))
+```
+

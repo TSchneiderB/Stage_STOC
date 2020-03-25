@@ -1,0 +1,75 @@
+---
+title: "Download_BirdLife_Data"
+author: "Thomas Schneider--Bruchon"
+date: "28/02/2020"
+---
+
+# Environment #
+```{r}
+library(sp)
+library(sf)
+library(rgdal)
+library(dplyr)
+library(data.table)
+library(RPostgreSQL)
+
+#Clean space 
+rm(list=ls())
+
+#Need to increase memory limit
+memory.limit(50000)
+```
+
+
+# Get all the BirdLife data #  (~10min) 
+```{r}
+#Shape path 
+path <- "Users/Schneider/STAGE_STOC_MNHN/BOTW.gdb"
+
+#Get the data 
+data <- read_sf(dsn = path, layer = "All_Species")
+
+#Selection and new dataset construction
+birdlife <- select(data, SISID, SCINAME, DATE_, PRESENCE, ORIGIN, SEASONAL, Shape, Shape_Area, Shape_Length)
+
+#Free space 
+rm(data)
+
+print("100%")
+```
+
+
+# Creation of the birdlife table in the stoc_eps database #  (~10min)
+```{r}
+#Connexion to the STOC-eps database 
+dbcon <- dbConnect(dbDriver("PostgreSQL"), dbname = "stoc_eps",
+                   host = "localhost", port = 5432,
+                   user = "postgres", password="postgres")
+
+#If exist, suppression of the birdlife table in the STOC-eps database
+if (dbExistsTable(dbcon, "birdlife")){
+  dbRemoveTable(dbcon, "birdlife")
+}
+  
+#Writing of the new birdlife table in the STOC-eps database
+st_write(birdlife, dsn = dbcon)
+
+#Logout
+dbDisconnect(dbcon)
+
+print("100%")
+```
+
+
+# Save the Birdlife data in a Rda file #  (~8min)
+```{r}
+save_path = "/Users/Schneider/STAGE_STOC_MNHN/Donnees/"
+save(birdlife, file = paste(save_path,"BirdLife_data.Rda",sep=""))
+```
+
+
+# Load the Birdlife_data.Rda file #
+```{r}
+load(paste(save_path,"BirdLife_data.Rda", sep=""))
+```
+

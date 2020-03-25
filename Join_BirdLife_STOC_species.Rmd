@@ -1,0 +1,91 @@
+---
+title: "Jointure_Esp"
+author: "Thomas Schneider--Bruchon"
+date: "11/03/2020"
+---
+
+# Environment # 
+```{r}
+library(RPostgreSQL)
+library(data.table)
+```
+
+
+# Jointure entre Espece BirdLife et Espece STOC (1/2) #
+```{r}
+#Database connexion
+dbcon <- dbConnect(dbDriver("PostgreSQL"), dbname = "stoc_eps",
+                   host = "localhost", port = 5432,
+                   user = "postgres", password="postgres")
+
+#Request to the stoc_eps database
+request = ' SELECT DISTINCT s.pk_species, s.scientific_name, s.french_name, b."SISID", b."SCINAME"
+            FROM public.birdlife as b, public.species as s
+            WHERE s.scientific_name = b."SCINAME"
+            ORDER BY s.french_name '
+
+#Get the species with common names between Birdlife and the STOC-eps database
+common_sp <- data.table(dbGetQuery(dbcon,request))
+
+
+#Encoding UTF-8
+write.csv(common_sp, file = "common_sp.csv")
+common_sp <- read.csv("common_sp.csv", header = T, sep = ",",  encoding="UTF-8")
+file.remove("common_sp.csv")
+
+
+#Request to the stoc_eps database
+request = ' SELECT DISTINCT s.pk_species, s.scientific_name, s.french_name
+            FROM public.species as s
+            WHERE s.scientific_name NOT IN (SELECT b."SCINAME" 
+                                            FROM public.birdlife as b) 
+            ORDER BY  s.french_name '
+
+#Get the species with uncommon names between Birdlife and the STOC-eps database
+uncommon_sp = data.table(dbGetQuery(dbcon,request))
+uncommon_sp <- uncommon_sp[-(1:3),]
+
+#Creation of a csv file
+write.csv(uncommon_sp, file = "Uncommon_species.csv")
+```
+
+
+### !!!!!
+### Need to add correspondence between names by hand in the Uncommon_species.csv file ###
+### !!!!!
+
+
+# Jointure entre Espece BirdLife et Espece STOC (2/2) #
+```{r}
+#Recovery of this csv file completed by hand
+uncommon_sp <- read.csv("Add_species.csv", header=T, sep="\t",  encoding="UTF-8")
+
+#pooling
+common_sp <- common_sp[,-1]
+uncommon_sp <- uncommon_sp[,-1]
+espece_BL_STOC <- rbind(common_sp,uncommon_sp)
+
+#clean space 
+rm(common_sp,uncommon_sp)
+
+#If exist, suppression of the espece_BL_STOC table in the STOC-eps database
+if (dbExistsTable(dbcon, "espece_BL_STOC")){
+  dbRemoveTable(dbcon, "espece_BL_STOC")
+}
+
+#Creation of the espece_BL_STOc table in the STOC-eps database    
+request = 'CREATE TABLE "espece_BL_STOC"
+                  (pk_species VARCHAR(10) primary key,
+                  scientific_name VARCHAR(50) NOT NULL, 
+                  french_name VARCHAR(50), 
+                  "SISID" INTEGER NOT NULL, 
+                  "SCINAME" VARCHAR(50) NOT NULL) '
+
+dbSendQuery(dbcon,request)
+
+#Write the csv data into the espece_BL_STOC table
+dbWriteTable(dbcon, name = "espece_BL_STOC", value = espece_BL_STOC, row.names = F, append = T)
+
+print("100%")
+```
+

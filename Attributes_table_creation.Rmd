@@ -1,0 +1,40 @@
+---
+title: "Attributes_table_creation"
+author: "Thomas Schneider--Bruchon"
+date: "15/03/2020"
+---
+
+# Environment # 
+```{r}
+library(RPostgreSQL)
+library(data.table)
+```
+
+
+# Creation of the attributes table #
+```{r}
+dataset <- read.csv("/Users/Schneider/Description_Attributes.csv", header = T, sep = "\t",  encoding="UTF-8")
+
+#Database connexion
+dbcon <- dbConnect(dbDriver("PostgreSQL"), dbname = "stoc_eps",
+                   host = "localhost", port = 5432,
+                   user = "postgres", password="postgres")
+
+#If exist, suppression of the attributes table in the STOC-eps database
+if (dbExistsTable(dbcon, "attributes"))
+    dbRemoveTable(dbcon, "attributes")
+
+request = 'CREATE TABLE attributes
+                  (pk_attributes VARCHAR(5) primary key,
+                  attributes VARCHAR(10) NOT NULL, 
+                  code INTEGER NOT NULL, 
+                  term VARCHAR(30) NOT NULL, 
+                  definition VARCHAR(500)) '
+
+dbSendQuery(dbcon,request)
+
+#Write the csv data into the attributes table
+dbWriteTable(dbcon, name = "attributes", value = dataset, row.names = F, append = T)
+
+print("100%")
+```
