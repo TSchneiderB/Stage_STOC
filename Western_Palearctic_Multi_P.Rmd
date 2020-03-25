@@ -1,0 +1,81 @@
+---
+title: "Western_Palearctic_Multi_P"
+author: "Thomas Schneider--Bruchon"
+date: "13/03/2020"
+---
+
+# Environment # 
+```{r}
+library(sf)
+library(RPostgreSQL)
+
+#Need to increase memory limit
+memory.limit(50000)
+```
+
+
+# Get the Birdlife data from Rda file #
+```{r}
+load("/Users/Schneider/STAGE_STOC_MNHN/Donnees/BirdLife_data.Rda")
+```
+
+
+# Get the Birdlife data directly from STOC-eps database #  (~10min)
+```{r}
+#Database connexion
+dbcon <- dbConnect(dbDriver("PostgreSQL"), dbname = "stoc_eps",
+                   host = "localhost", port = 5432,
+                   user = "postgres", password="postgres")
+
+#Request to the stoc_eps database
+birdlife <- st_read(dbcon, layer = "birdlife")
+```
+
+
+# Get the polygons of the Western Palearctic #
+```{r}
+#Database connexion
+dbcon <- dbConnect(dbDriver("PostgreSQL"), dbname = "stoc_eps",
+                   host = "localhost", port = 5432,
+                   user = "postgres", password="postgres")
+
+#Request to the stoc_eps database
+request <- 'SELECT *
+            FROM public."espece_BL_STOC"'
+espece_BL_STOC = data.table(dbGetQuery(dbcon,request))
+
+
+#Get polygons only for commons species between Birdlife and the STOC-eps database
+#--------------------------------------------------
+bool = 0
+for(i in 1:nrow(birdlife)){
+  row <- birdlife[i,]
+  for(id1 in espece_BL_STOC$SISID){
+    if(id1 == row$SISID){
+      if(bool == 0){
+        dataset = row
+        bool = 1
+      } 
+      else{
+        dataset = rbind(dataset,row)
+      }
+    }
+  }
+}
+#--------------------------------------------------
+
+
+#Get the Western Palearctic Shape file
+Western_Palearctic <- st_read("/Users/Schneider/STAGE_STOC_MNHN/Shapefile/Western_Palearctic/Western_Palearctic.shp")
+
+# Get the polygons that intersect with the Western Palearctic
+BL_WPalearctic <- st_intersection(Western_Palearctic,dataset)
+BL_WPalearctic <- BL_WPalearctic[,-(1:3)]
+```
+
+
+# Save the BL_WPalearctic in a Rda file #
+```{r}
+save(BL_WPalearctic, file = "BL_WPalearctic.Rda")
+```
+

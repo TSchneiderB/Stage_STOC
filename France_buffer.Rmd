@@ -1,0 +1,68 @@
+---
+title: "Untitled"
+author: "Thomas Schneider--Bruchon"
+date: "25/03/2020"
+output: html_document
+---
+
+# Environment # 
+```{r}
+library(sf)
+library(maps)
+library(ggplot2)
+```
+
+# Buffer creation #
+```{r}
+#Get the France Shape file
+france <- st_read("/Users/Schneider/STAGE_STOC_MNHN/Shapefile/France/FRA_adm0.shp")
+
+#Get the Rda file that contains all Birdlife polygons of the Western Palearctic area" 
+load("/Users/Schneider/STAGE_STOC_MNHN/Donnees/BL_all_polygons_WP.Rda")
+
+#Convertion to the Lambert coordinates
+france2 <- st_transform(france, crs = 2154)
+
+#Creation of the France buffer
+#Distance = 50km 
+france3 <- st_buffer(france2, dist = 50000) 
+
+#Convertion to the WGS 84 coordinates 
+france_buffer <- st_transform(france3,crs = 4326)
+
+#Clean space
+rm(france2,france3)
+```
+
+
+# Get the Birdlife France Polygon #  
+```{r}
+#Get the polygons that intersect with France
+BL_all_polygons_F <- st_intersection(france_buffer,BL_all_polygons_WP)
+BL_all_polygons_F <- BL_all_polygons_F[,71:80]
+```
+
+
+# Save the Birdlife France polygons in a Rda file #
+```{r}
+save(BL_all_polygons_F, file = "/Users/Schneider/STAGE_STOC_MNHN/Donnees/BL_all_polygons_F.Rda")
+```
+
+
+# Map creation in order to see the France buffer polygon #
+```{r}
+#background map
+monde <- map_data("world")
+
+#mapping + adjustments
+plot <-   ggplot()+ 
+          geom_polygon(data=monde, aes(x=long,y=lat,group=group), fill="lightyellow2", col="black")+
+          geom_sf(data=france_buffer, fill="red", alpha=0.3)+ 
+          geom_sf(data=france, fill="lightgreen")+
+          theme_void()+
+          coord_sf(xlim = c(-10,20), ylim = c(40,60))+
+          ggtitle("France Buffer")+
+          theme(panel.background = element_rect(fill="lightskyblue1"), plot.title =element_text(color="#063376", hjust=0.5, vjust=3))
+
+plot
+```

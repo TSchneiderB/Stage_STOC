@@ -1,0 +1,160 @@
+---
+title: "Western_Palearctic_All_P"
+author: "Thomas Schneider--Bruchon"
+date: "15/03/2020"
+---
+
+# Environment #
+```{r}
+library(sf)
+
+#Clean space 
+rm(list=ls())
+```
+
+
+# Function #  Very long 
+```{r}
+#Deletion: PRESENCE > 3 et SEASONAL > 4
+deletion_P_S <- function(dataframe){
+  
+  #list of line numbers to delete
+  mem <- c()
+
+  for(i in 1:nrow(dataframe)){
+    if(i%%10000 == 0){
+      print(paste(round((i/nrow(dataframe))*100, 0),"%", sep =""))   
+    }
+    if(dataframe[i,]$PRESENCE > 3 && dataframe[i,]$SEASONAL > 4){
+      mem <- c(mem,i)
+    }
+  }
+  
+  #sort in descending order
+  mem <- rev(sort(mem))
+  
+  #deletion
+  for(i in mem){
+    print(dataframe[i,])
+    test <- dataframe[-i,]
+  }
+  return(dataframe)
+}
+
+
+
+#Get all polygons from multipolygons
+get_all_polygons <- function(dataframe){
+  
+  bool = 0
+  
+  #Clean space
+  rm(dataset)
+  rm(all_polygons)
+  
+  #Column deletion
+  print("Useless column deletion")
+  print(ncol(dataframe))
+  dataframe <- dataframe[,-(7:8)]
+  print("DONE")
+  print(ncol(dataframe))
+  print("START PHASE 1/2")
+  
+  #Get all polygons
+  for(i in 1:nrow(dataframe)){
+    if(i%%110 == 0){ 
+      #advancement
+      print(paste(round((i/nrow(dataframe))*100, 0),"%", sep =""))  
+      save(dataset, file = paste("Test_",i/110,".Rda",sep=""))
+      rm(dataset)
+      bool = 0
+    }
+    Res <- st_cast(dataframe[i,], "POLYGON")  #transform multipolygon in polygons
+    if(bool == 0){
+      dataset = Res
+      bool = 1
+    } 
+    else{
+      dataset = rbind(dataset,Res)
+    }
+    if(i == nrow(dataframe)){
+      j = ceiling(i/110) 
+      save(dataset, file = paste("Test_",j,".Rda",sep=""))
+      bool = 0
+      rm(dataset)
+      print("END PHASE 1/2")
+    }
+  }
+ 
+  rlist <- c()
+  print("START PHASE 2/2")
+  
+  for(i in 1:j){
+    #advancement
+    print(paste(round((i/j)*100, 0),"%", sep =""))
+    load(paste("Test_",i,".Rda",sep=""))
+    rlist <- c(rlist,(paste("Test_",i,".Rda",sep=""))) 
+    if(bool == 0){
+      all_polygons = dataset
+      bool = 1
+    }
+    all_polygons = rbind(all_polygons,dataset)
+    rm(dataset)
+  }
+  
+  print("END PHASE 2/2")
+  file.remove(rlist)
+  rm(rlist)
+  return(all_polygons)
+}
+
+
+
+#Calculation of the area, perimeter and centroid of each polygon
+calc_area_len <- function(dataframe){
+  
+  transform <- st_transform(dataframe, 2154)
+  
+  list_area <- c()
+  list_length <- c()
+  list_centroid <- c()
+  
+  for(i in 1:nrow(dataframe)){
+    if(i%%5000 == 0){
+      print(paste(round((i/nrow(dataframe))*100, 0),"%", sep =""))
+    }
+    area = as.integer(st_area(dataframe[i,]$geometry)/10000) #ha
+    length = as.integer(st_length(dataframe[i,]$geometry))
+    centroid = st_centroid(transform[i,]$geometry)
+    list_area <- c(list_area,area)
+    list_length <- c(list_length,length)
+    list_centroid <- c(list_centroid,centroid)
+  }
+  dataframe$area <- list_area
+  dataframe$lenght <- list_length
+  dataframe$centroid <- list_centroid
+  
+  return(dataframe)
+}
+```
+
+
+# Need the Birdlife polygons of the Western Palearctic
+```{r}
+load("/Users/Schneider/STAGE_STOC_MNHN/Donnees/BL_WPalearctic.Rda")
+```
+
+
+# Execution # 
+```{r}
+BL_WPalearctic <- deletion_P_S(BL_WPalearctic)
+data <- get_all_polygons(BL_WPalearctic)
+BL_all_polygons_WP <- calc_area_len(data)
+```
+
+
+# Save the BL_all_polygons_WP in a Rda file # 
+```{r}
+save(BL_all_polygons_WP, file = "/Users/Schneider/STAGE_STOC_MNHN/Donnees/BL_all_polygons_WP.Rda")
+```
+
