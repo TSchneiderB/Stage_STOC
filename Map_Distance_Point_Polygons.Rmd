@@ -1,0 +1,387 @@
+---
+title: "Teletravail 3"
+author: "Thomas Schneider--Bruchon"
+date: "30/03/2020"
+output: html_document
+---
+
+# Map Point-Polygon Distance
+
+# Environnement 
+```{r}
+rm(list=ls())
+library(sf)
+library(dplyr)
+library(units)
+library(lubridate)
+```
+
+
+# Variables
+```{r}
+species = "Saxicola rubetra"
+path = "/Users/Schneider/STAGE_STOC_MNHN/Donnees"
+species = "Numenius arquata"
+passage = 'all'
+year = "all"
+```
+
+# Loading data table 
+```{r}
+load(paste(path,"/observation_STOC.Rda", sep = ""))
+
+load(paste(path,"/espece_BL_STOC.Rda", sep = ""))
+
+load(paste(path,"/Point_obs_STOC.Rda", sep = ""))
+
+load(paste(path,"/BL_all_polygons_F.Rda", sep = ""))
+
+load(paste(path,"/inventaire_STOC.Rda", sep = ""))
+```
+
+
+# Function
+# Recovery of the species area #
+```{r}
+area <- function(species, area_table){
+    
+    #get the species distribution area
+    try(area <- area_table %>%
+    filter(SCINAME %in% species), silent = T)
+    
+    if(length(area)<1){
+      return(paste("Error,",species,"n'est pas dans la table de comparaison"))
+    }
+  
+    #get only resident and breeding season
+    try(good_area <- area %>%
+    filter(SEASONAL %in% c(1,2)), silent = T)
+  
+    return(good_area)
+}
+```
+
+
+
+# Recovery of the points coordinates
+```{r}
+cordinates <- function(species, observation_data, inventaire_data, table_comparaison, table_point, passage,year){
+    
+    #get species code
+    try(row <- table_comparaison %>%
+    filter(SCINAME %in% species), silent = T)
+    sp_code <- as.character(row$pk_species)
+    
+    if(length(sp_code)<1){
+      return(paste("Error,",species,"n'est pas dans la table de comparaison"))
+    }
+    
+    
+    #get the points id
+    try(row <- observation_data %>%
+    filter(espece %in% sp_code), silent = T)
+    id_point_ob <- row$id_point
+    
+    #get passage
+    try(row <- inventaire_data %>%
+    filter(id_point_ob %in% id_inventaire_ob), silent = T)
+    passage_ob <- row$passage
+    id_point_inv <- row$id_point
+    date <- year(as.Date(row$date))
+    
+    id_point_p1 <- c()
+    id_point_p2 <- c()
+    
+    for(i in 1:length(id_point_inv)){
+      if(year == "all"){
+        if(passage_ob[i] == 1){
+          id_point_p1 <- c(id_point_p1, as.character(id_point_inv[i])) 
+        }
+        if(passage_ob[i] == 2){
+          id_point_p2 <- c(id_point_p2, as.character(id_point_inv[i])) 
+        }
+      }
+      else{
+        if(date[i] == year){
+          if(passage_ob[i] == 1){
+            id_point_p1 <- c(id_point_p1, as.character(id_point_inv[i])) 
+          }
+          if(passage_ob[i] == 2){
+            id_point_p2 <- c(id_point_p2, as.character(id_point_inv[i])) 
+          }
+        }
+      }
+    }
+    
+    cor_pt_1 <- NULL
+    cor_pt_2 <- NULL
+    
+    #get the points cordinates
+    if(passage == "all"){
+      try(cor_pt_1 <- table_point %>%
+      filter(pk_point %in% id_point_p1))
+      
+      try(cor_pt_2 <- table_point %>%
+      filter(pk_point %in% id_point_p2))
+    }
+    
+    else{
+      if(passage == 1){
+        try(cor_pt_1 <- table_point %>%
+        filter(pk_point %in% id_point_p1))
+        cor_pt_2 <- NULL
+      }
+      if(passage == 2){
+        try(cor_pt_2 <- table_point %>%
+        filter(pk_point %in% id_point_p2))
+        cor_pt_1 = NULL
+      }
+    }
+    
+    dataframe <- rbind(cor_pt_1,cor_pt_2)
+    return(dataframe)
+}
+```
+
+
+
+# Function
+# returning position nearest polygon point
+```{r}
+
+position_pt_pol <- function(Cordinates,polygon_Lambert){
+  
+  #Recovery points in polygons and points outside polygons
+  point_dans_polygon <- c()
+  point_ext_polygon <- c()
+  
+  for(i in 1:nrow(Cordinates)){
+    point <- Cordinates[i,]$geom93
+    if(st_within(point,polygon_Lambert) %>% lengths > 0){
+      row = st_sf(id_point_obs=Cordinates[i,]$pk_point, point_obs=point)
+      point_dans_polygon <- rbind(point_dans_polygon,row)
+    }
+    else{
+      row = st_sf(id_point_obs=Cordinates[i,]$pk_point, point_obs=point)
+      point_ext_polygon <-  rbind(point_ext_polygon,row)
+    }
+  }
+  
+  if(length(point_ext_polygon) == 0){
+    return(0)
+  }
+  
+  #Closest polygon point recovery (FOR EXT POL POINTS)
+  nearest_polygon <- c()
+
+  for(i in 1:nrow(point_ext_polygon)){
+    point <- point_ext_polygon[i,]$point
+    indice <- st_nearest_feature(point,polygon_Lambert)
+    linestring <- st_nearest_points(point,polygon_Lambert[indice,])
+    point_pol <- st_cast(linestring, "POINT")[2]
+    distance <- st_distance(point,point_pol)
+    units(distance) <- with(ud_units, km)
+    distance <- round(distance,2)
+    row = st_sf(point_pol=point_pol, polygon=polygon_Lambert[indice,]$geometry, area=polygon_Lambert[indice,]$area, length=polygon_Lambert[indice,]$lenght, distance=distance)
+    nearest_polygon <- rbind(nearest_polygon,row)
+  }
+  
+  #Merging tables
+  data <- cbind(point_ext_polygon,nearest_polygon)
+  
+  
+  #Verification no empty Geometry
+  list_supp <- c()
+  for(i in 1:nrow(data)){
+    cor_obs <- data[i,]$point_obs
+    cor_pol <- data[i,]$point_pol
+    if(is.na(st_dimension(st_sfc(cor_obs))) || is.na(st_dimension(st_sfc(cor_obs)))){
+      list_supp <- c(list_supp,i)
+    }
+  }
+  list_supp <- sort(list_supp, decreasing = T)
+  for(i in list_supp){
+    data <- data[-i,]
+    print(paste("Row",i,"was deleted because it contained GEOMETRYCOLLECTION EMPTY", sep =" "))
+  }
+
+  return(data)
+}
+```
+
+
+# Dataframe Construction  
+```{r}
+
+# Gives coordinates in WGS to make the map
+get_Segment_WGS <- function(data){
+  cor_obs <- st_transform(data$point_obs,4326)
+  cor_obs_WGS <- as.data.frame(st_coordinates(cor_obs))
+  colnames(cor_obs_WGS)[1] <- "X_obs"
+  colnames(cor_obs_WGS)[2] <- "Y_obs"
+  
+  cor_pol <- st_transform(data$point_pol,4326)
+  cor_pol_WGS <- as.data.frame(st_coordinates(cor_pol))
+  colnames(cor_pol_WGS)[1] <- "X_pol"
+  colnames(cor_pol_WGS)[2] <- "Y_pol"
+  
+  Segment <- cbind(cor_obs_WGS,cor_pol_WGS,data$distance)
+  colnames(Segment)[5] <- "distance"
+  
+  return(Segment)
+}
+
+
+# Gives the coordinates in Lambert
+get_Segment_Lambert <- function(data){
+  
+  cor_obs <- as.data.frame(st_coordinates(data$point_obs))
+  colnames(cor_obs)[1] <- "X_obs"
+  colnames(cor_obs)[2] <- "Y_obs"
+  
+  cor_pol <- as.data.frame(st_coordinates(data$point_pol))
+  colnames(cor_pol)[1] <- "X_pol"
+  colnames(cor_pol)[2] <- "Y_pol"
+  
+  Segment <- cbind(cor_obs,cor_pol,data$distance)
+  colnames(Segment)[5] <- "distance"
+  
+  return(Segment)
+}
+
+
+```
+
+
+# Execution function 1
+# Return a datatable which contains the cordinates of the points outside of the polygons for one species (WGS cordinates)
+```{r}
+proximite_WGS <- function(species,BL_all_polygons_F,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year){
+  
+  Area <- area(species,BL_all_polygons_F)
+  Cordinates <- cordinates(species,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year)
+  
+  if(nrow(Cordinates) == 0){
+    print(paste("No observation for the species",species,"in year",year, sep=" "))
+    return(0)
+  }
+  
+  #Area$geometry WGS84 -> lambert
+  polygon_Lambert <- st_transform(Area,2154)
+  
+  data <- position_pt_pol(Cordinates,polygon_Lambert) 
+
+  if(is.null(nrow(data))){
+    print(paste("There was no observation point outside polygon for the species",species,"in year",year, sep=" "))
+    return(0)
+  }
+  
+  Segment <- get_Segment_WGS(data)
+  
+  return(Segment)
+}
+```
+
+
+# Execution function 2
+# Return a datatable which contains the cordinates of the points outside of the polygons for one species (Lambert cordinates)
+```{r}
+proximite_Lambert <- function(species,BL_all_polygons_F,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year){
+  
+  Area <- area(species,BL_all_polygons_F)
+  Cordinates <- cordinates(species,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year)
+  
+  if(nrow(Cordinates) == 0){
+    print(paste("No observation for the species",species,"in year",year, sep=" "))
+    return(0)
+  }
+  
+  # Area$geometry WGS84 -> lambert
+  polygon_Lambert <- st_transform(Area,2154)
+  
+  data <- position_pt_pol(Cordinates,polygon_Lambert) 
+
+  if(is.null(nrow(data))){
+    print(paste("There was no observation point outside polygon for the species",species,"in year",year, sep=" "))
+    return(0)
+  }
+  
+  Segment <- get_Segment_Lambert(data)
+  
+  return(Segment)
+}
+```
+
+
+# Execution function 3
+# Return a data table which contains the points outside of the polygons and informations about these polygons
+```{r}
+all_data <- function(species,BL_all_polygons_F,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year){
+  
+  Area <- area(species,BL_all_polygons_F)
+  Cordinates <- cordinates(species,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year)
+  
+  if(nrow(Cordinates) == 0){
+    print(paste("No observation for the species",species,"in year",year, sep=" "))
+    return(0)
+  }
+  
+  #Area$geometry WGS84 -> lambert
+  polygon_Lambert <- st_transform(Area,2154)
+  
+  data <- position_pt_pol(Cordinates,polygon_Lambert)
+  
+  if(is.null(nrow(data))){
+    print(paste("There was no observation point outside polygon for the species",species,"in year",year, sep=" "))
+    return(0)
+  }
+  
+  return(data)
+}
+```
+
+
+
+# Execution
+```{r}
+Segment_WGS <- proximite_WGS(species,BL_all_polygons_F,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year)
+
+Segment_Lambert <- proximite_Lambert(species,BL_all_polygons_F,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year)
+
+data <- all_data(species,BL_all_polygons_F,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year)
+```
+
+
+
+# Map creation 
+```{r}
+species = "Sylvia melanocephala"
+monde <- map_data("world")
+Area <- area(species,BL_all_polygons_F)
+Segment <- proximite_WGS(species,BL_all_polygons_F,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year)
+Cordinates <- cordinates(species,observation_STOC,inventaire_stoc,espece_BL_STOC,Point_obs_STOC,passage,year)
+description <- c("1" = "Resident", "2"= "Breeding Season", "3" = "Non-breeding Season", "4" = "Passage")
+cols <- c("1" = "darkmagenta", "2"= "firebrick1","3" = "deepskyblue2", "4" = "gold")
+
+map <- ggplot()+
+      geom_polygon(data=monde,aes(x=long,y=lat,group=group),fill="papayawhip",col="black")+
+      geom_sf(data = Area, aes(fill = factor(SEASONAL)), alpha=0.4)+
+      geom_point(data=Cordinates,aes(x=longitude_wgs84, y=latitude_wgs84),col = "gray0", size = 1)+
+      geom_segment(data = Segment, aes(x = X_obs, xend = X_pol, y = Y_obs, yend = Y_pol), col = "green4", size = 1)+
+      geom_text(data = Segment %>% filter(as.numeric(distance)>31), aes(x = X_obs, y = Y_obs, label=distance), nudge_y = -0.2, check_overlap = TRUE, size = 2, col = "red")+
+      scale_fill_manual(values = cols, name = NULL, labels = description)+
+      coord_sf(xlim = c(-10,10), ylim = c(40,55))+
+      guides(alpha = "none")+
+      theme_void()+
+      labs(title = paste("Aire de répartition de",species,year), caption = "based on BirdLife & STOC-eps data")+
+      theme(panel.background = element_rect(fill ="slategray1"), plot.title =element_text(color = "#063376", hjust = 0.5, vjust = 3), plot.caption = element_text(face = "bold", vjust = 1), legend.margin = margin(0,0,0,1, "cm"))
+
+map
+```
+
+# Save
+```{r}
+#Save the last created map
+save_path = "/Users/Schneider/STAGE_STOC_MNHN/Cartes/"
+ggsave(paste(save_path,species,"_",passage,"_",year,".png", sep = ""))
+```

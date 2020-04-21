@@ -1,0 +1,48 @@
+---
+title: "BL_species_map"
+author: "Thomas Schneider--Bruchon"
+date: "18/03/2020"
+output: html_document
+---
+
+### Birdlife map Creation for one species ###
+
+# Environnement
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+# Variable
+```{r}
+species = "Anthus pratensis"
+load("/Users/Schneider/STAGE_STOC_MNHN/Donnees/BL_all_polygons_F.Rda")
+```
+
+# Function
+```{r}
+Species_area <- function(species,area_table){
+  
+  #get the species distribution area
+  try(area <- area_table %>%
+  filter(SCINAME %in% species), silent = T)
+  
+  #get the world map
+  monde <- map_data("world")
+  
+  #map creation 
+  map <- ggplot()+
+      geom_polygon(data=monde,aes(x=long,y=lat,group=group),fill="papayawhip",col="black")+
+      geom_sf(data = area, aes(fill = factor(SEASONAL)), alpha=0.4)+
+      coord_sf(xlim = c(-10,10), ylim = c(40,55))
+
+  save(map, file = paste(species,".Rda", sep=""))
+  
+  return(map)
+}
+```
+
+# Run
+```{r}
+map_species <- Jean(species,BL_all_polygons_F)
+```
