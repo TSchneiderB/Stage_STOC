@@ -1,0 +1,111 @@
+---
+title: "100_Most_Observed_sp"
+author: "Thomas Schneider--Bruchon"
+date: "01/04/2020"
+output: html_document
+---
+
+# Recovery of the 100 most observed species and passage to the square cordinates (!= points)
+
+# Environnement 
+```{r, message=FALSE}
+rm(list=ls())
+library(sf)
+library(maps)
+library(dplyr)
+library(units)
+library(ggplot2)
+library(lubridate)
+```
+
+
+# Variables
+```{r}
+path = "/Users/Schneider/STAGE_STOC_MNHN/Donnees"
+load(paste(path,"/observation_STOC.Rda", sep = ""))
+load(paste(path,"/inventaire_STOC.Rda", sep = ""))
+```
+
+# Recovery of 100 most abundant species
+```{r}
+selection <- select(observation_STOC, code_sp,abondance)
+datatable <- aggregate(selection$abondance, by = list(code_sp=selection$code_sp), FUN = sum)
+order_sp <- datatable[order(datatable$x, decreasing = T),]
+ab_sp <- order_sp[1:101,]
+```
+
+
+# Get all the data for these species
+```{r}
+try(sp_data <- observation_STOC %>%
+filter(espece %in% ab_sp$code_sp), silent = T)
+
+sp_data <- select(sp_data,id_inventaire,id_carre,date,code_sp,abondance,distance_contact)
+date <- year(as.Date(sp_data$date))
+sp_data$date <- date
+```
+
+
+# Cleaning
+```{r}
+rm(observation_STOC,ab_sp,datatable,order_sp,selection,date)
+```
+
+
+# Recovery year passing
+```{r}
+id_inventaire <- sp_data$id_inventaire
+
+try(selection <- inventaire_STOC %>%
+filter(pk_inventaire %in% id_inventaire), silent = T)
+
+id_inventaire <- as.character(selection$pk_inventaire)
+passage_ob <- selection$passage_stoc
+
+inv_data <- as.data.frame(cbind(id_inventaire,passage_ob))
+```
+
+
+#Cleaning
+```{r}
+rm(inventaire_STOC,selection,id_inventaire,passage_ob)
+```
+
+
+# Delete contact distance "transit", date < 2001, and passage "NA"
+```{r}
+datatable <- inner_join(inv_data,sp_data)
+datatable <- subset(datatable,distance_contact != "TRANSIT")
+datatable <- subset(datatable,date > "2001")
+datatable <- subset(datatable,passage_ob != "NA")
+```
+
+# Sum of species abundance per square, year, passage
+```{r}
+datatable <- aggregate(datatable$abondance, by = list(id_carre=datatable$id_carre, code_sp=datatable$code_sp, date=datatable$date, passage=datatable$passage_ob), FUN = sum)
+colnames(datatable)[5] <- "abondance"
+```
+
+
+# Recovery of square coordinates
+```{r}
+dataframe <- read.csv(paste(path,"/carre_2019-03-13.csv", sep=""), header=T, sep=";",  encoding="UTF-8")
+selection <- select(dataframe, pk_carre, longitude_grid_wgs84, latitude_grid_wgs84)
+
+obs_STOC_100sp <- inner_join(datatable,selection, by = c("id_carre" = "pk_carre"))
+```
+
+
+#Cleaning
+```{r}
+rm(dataframe,selection,datatable,sp_data,inv_data)
+```
+
+
+# Save
+```{r}
+save_path = "/Users/Schneider/STAGE_STOC_MNHN/Donnees/"
+save(obs_STOC_100sp, file = paste(save_path,"/obs_STOC_100sp.Rda", sep = ""))
+```
+
+

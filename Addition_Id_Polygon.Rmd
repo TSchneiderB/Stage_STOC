@@ -1,0 +1,109 @@
+---
+title: "Addition_id_polygon"
+author: "Thomas Schneider--Bruchon"
+date: "02/04/2020"
+output: html_document
+---
+
+### Addition of an id_polygon
+
+
+# Environment 
+```{r, message=FALSE}
+rm(list=ls())
+library(sf)
+library(dplyr)
+```
+
+
+# Variables
+```{r, message=FALSE}
+path =  "/Users/Schneider/STAGE_STOC_MNHN/Donnees"
+load(paste(path,"/espece_BL_STOC.Rda", sep = ""))
+load(paste(path,"/BL_all_polygons_F_remanie.Rda", sep = ""))
+```
+
+
+## Sorting in espece_BL_STOC
+# Search for duplicates
+```{r}
+doublonstest<-which(duplicated(espece_BL_STOC$SCINAME))
+print(doublonstest)
+```
+
+# Why these duplicates ? 
+```{r}
+list <- c()
+for(i in 1:nrow(espece_BL_STOC)){
+  codes_sp <- espece_BL_STOC[i,]$pk_species
+  codes_sp <- as.character(codes_sp)
+  if(nchar(codes_sp) > 7){
+    list <- c(list,i)
+    print(codes_sp)
+    #We see that the duplicated lines correspond for the most part
+  }
+}
+espece_BL_STOC2 <- espece_BL_STOC[-list,]
+```
+
+# What duplicates are still on the list?
+```{r}
+doublonstest2<-which(duplicated(espece_BL_STOC2$SCINAME))
+print(doublonstest2)
+```
+
+# Deletion of the line(s) to delete
+```{r}
+espece_BL_STOC3 <- espece_BL_STOC2[-102,]
+```
+
+# Save
+```{r}
+espece_BL_STOC <- espece_BL_STOC3
+save(espece_BL_STOC, file = paste(path,"/espece_BL_STOC.Rda", sep=""))
+```
+
+# Cleaning 
+```{r}
+rm(espece_BL_STOC2,espece_BL_STOC3,codes_sp,doublonstest,doublonstest2,i,list)
+```
+
+
+## Addition of an id_polygon
+# Construction id = code_sp + "BL" + year + polygon size increment
+```{r}
+new_BL_all_polygons_F <- c()
+
+for(i in 1:nrow(espece_BL_STOC)){
+  species <- espece_BL_STOC[i,]$SCINAME
+  code_sp <- espece_BL_STOC[i,]$pk_species
+  
+  try(sp_data <- BL_all_polygons_F %>%
+  filter(SCINAME %in% species), silent = T)
+  
+  if(nrow(sp_data)){
+    sp_data <- sp_data[order(sp_data$area, decreasing = T),]
+    new_sp_data <- c()
+    
+    for(j in 1:nrow(sp_data)){
+      year <- sp_data[j,]$DATE_
+      id_polygone <- paste(code_sp,"_BL",year,"_",j, sep="")
+      row <- cbind(id_polygone,sp_data[j,])
+      new_sp_data <- rbind(new_sp_data,row)
+    }
+    
+    new_BL_all_polygons_F <- rbind(new_BL_all_polygons_F,new_sp_data)
+  }
+}
+```
+
+# Cleaning
+```{r}
+rm(new_sp_data,row,sp_data,code_sp,i,id_polygone,j,species,year)
+```
+
+# Save
+```{r}
+save(new_BL_all_polygons_F, file = paste(path,"/BL_all_polygons_F_remanie.Rda", sep =""))
+```
+
