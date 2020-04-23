@@ -1,0 +1,569 @@
+---
+title: "All_species_dataset"
+author: "Thomas Schneider--Bruchon"
+date: "16/04/2020"
+output: html_document
+---
+
+# Environment
+```{r}
+rm(list=ls())
+library(sf)
+library(dplyr)
+library(units)
+library(lubridate)
+```
+
+
+# Variables
+```{r}
+path = "/Users/Schneider/STAGE_STOC_MNHN/Donnees"
+load(paste(path,"/observation_STOC.Rda", sep = ""))
+load(paste(path,"/espece_BL_STOC.Rda", sep = ""))
+load(paste(path,"/BL_all_polygons_F_remanie.Rda", sep = ""))
+```
+
+# Recovery year passing
+```{r}
+date <- year(as.Date(observation_STOC$date))
+observation_STOC$date <- date
+
+load(paste(path,"/inventaire_STOC.Rda", sep = ""))
+id_inventaire <- observation_STOC$id_inventaire
+
+try(selection <- inventaire_STOC %>%
+filter(pk_inventaire %in% id_inventaire), silent = T)
+id_inventaire <- as.character(selection$pk_inventaire)
+passage_ob <- selection$passage_stoc
+inv_data <- as.data.frame(cbind(id_inventaire,passage_ob))
+
+#Cleaning 
+rm(inventaire_STOC,selection,id_inventaire,passage_ob,date)
+```
+
+
+# Delete contact distance "transit", date < 2001, and passage "NA"
+```{r}
+datatable <- inner_join(inv_data,observation_STOC)
+datatable <- subset(datatable,distance_contact != "TRANSIT")
+datatable <- subset(datatable,date > "2001")
+datatable <- subset(datatable,passage_ob != "NA")
+```
+
+
+# Sum of species abundance per square, year, passage
+```{r}
+datatable <- aggregate(datatable$abondance, by = list(id_carre=datatable$id_carre, code_sp=datatable$code_sp, date=datatable$date, passage=datatable$passage_ob), FUN = sum)
+colnames(datatable)[5] <- "abondance"
+```
+
+
+# Recovery of square coordinates
+```{r}
+dataframe <- read.csv(paste(path,"/carre_2019-03-13.csv", sep=""), header=T, sep=";",  encoding="UTF-8")
+selection <- select(dataframe, pk_carre, longitude_grid_wgs84, latitude_grid_wgs84)
+
+all_obs_STOC <- inner_join(datatable,selection, by = c("id_carre" = "pk_carre"))
+```
+
+
+# Cleaning 
+```{r}
+rm(dataframe,selection,datatable,inv_data,observation_STOC)
+```
+
+
+# Save
+```{r}
+save_path = "/Users/Schneider/STAGE_STOC_MNHN/Donnees/"
+save(all_obs_STOC, file = paste(save_path,"/all_obs_STOC.Rda", sep = ""))
+```
+
+
+# If you have already do this part you can just load the "all_obs_STOC" datatable
+```{r}
+load(paste(path,"/all_obs_STOC.Rda", sep = ""))
+```
+
+
+# Get the BL area for 1 species
+```{r}
+area <- function(code_sp, comparaison_table, area_table){
+  
+    #get the species BL name
+    try(row <- comparaison_table %>%
+    filter(pk_species %in% code_sp), silent = T)
+    species <- as.character(row$SCINAME)
+    cat(species,"\n")
+    
+    #get the species distribution area
+    try(area <- area_table %>%
+    filter(SCINAME %in% species), silent = T)
+    
+    if(length(area)<1){
+      return(paste("Error,",species,"n'est pas dans la table de comparaison"))
+    }
+  
+    #get only resident and breeding season
+    try(good_area <- area %>%
+    filter(SEASONAL %in% c(1,2)), silent = T)
+  
+    return(good_area)
+}
+```
+
+
+
+# Get the observations for 1 species
+```{r}
+observation <- function(sp_code, observation_table){
+    
+    #get the observations
+    try(obs_sp <- observation_table %>%
+    filter(code_sp %in% sp_code), silent = T)
+    
+    if(length(sp_code)<1){
+      return(paste("Error,",sp_code,"n'est pas dans la table d'observation"))
+    }
+    
+    obs_sp <- subset(obs_sp, longitude_grid_wgs84 != "NA")
+    
+    return(obs_sp)
+}
+```
+
+
+
+
+# Get id_carre
+```{r}
+get_carre <- function(observation_species){
+    
+    carre <- select(observation_species, id_carre, longitude_grid_wgs84, latitude_grid_wgs84)
+    carre <- distinct(carre)
+
+    return(carre)
+}
+```
+
+
+
+
+# Function:
+# Bool == 1  ->   return(POINT IN POLYGON)
+# Bool == 0  ->   return(POINT EXT POLYGON)
+```{r}
+position_car_pol <- function(obs_sp,area_sp,bool){
+  
+  # Conversion to Lambert coordinates
+  polygon_Lambert <- st_transform(area_sp,2154)
+  
+  #Initialisation
+  point_dans_polygon <- c()
+  point_ext_polygon <- c()
+  
+  #print("START PHASE 1/2")
+  
+  for(i in 1:nrow(obs_sp)){
+    
+    cordinates <- st_point(c(obs_sp[i,]$longitude_grid_wgs84, obs_sp[i,]$latitude_grid_wgs84))
+    cordinates <- st_sfc(cordinates)
+    st_crs(cordinates) <- 4326
+    cordinates <- st_transform(cordinates,2154)
+    
+    if(bool > 0){
+      if(st_within(cordinates,polygon_Lambert) %>% lengths > 0){
+        row = st_sf(id_carre=obs_sp[i,]$id_carre, cor_carre=cordinates)
+        point_dans_polygon <- rbind(point_dans_polygon,row)
+     }
+    }
+    else{
+      if(!st_within(cordinates,polygon_Lambert) %>% lengths > 0){
+        row = st_sf(id_carre=obs_sp[i,]$id_carre, cor_carre=cordinates)
+        point_ext_polygon <- rbind(point_ext_polygon,row)
+      }
+    }
+    
+    if(i%%(ceiling(nrow(obs_sp)/20)) == 0  || i == nrow(obs_sp)){
+      #print(paste(round((i/nrow(obs_sp))*100, 0),"%", sep =""))
+      if(bool==0){
+        save(point_ext_polygon, file = paste("Test_",ceiling(i/ceiling(nrow(obs_sp)/20)),".Rda",sep=""))
+        rm(point_ext_polygon)
+        point_ext_polygon <- c()
+        j = ceiling(i/ceiling(nrow(obs_sp)/20)) 
+      }
+      else{
+        save(point_dans_polygon, file = paste("Test_",ceiling(i/ceiling(nrow(obs_sp)/20)),".Rda",sep=""))
+        rm(point_dans_polygon)
+        point_dans_polygon <- c()
+        j = ceiling(i/ceiling(nrow(obs_sp)/20)) 
+      }
+    }
+  }
+  
+  
+  #print("END PHASE 1/2")
+  
+  rlist <- c()
+  #print("START PHASE 2/2")
+  
+  point_ext_polygon_f <- c()
+  point_dans_polygon_f <- c()
+  
+  
+  for(i in 1:j){
+    #print(paste(round((i/j)*100, 0),"%", sep =""))
+    load(paste("Test_",i,".Rda",sep=""))
+    rlist <- c(rlist,(paste("Test_",i,".Rda",sep="")))
+    if(bool == 0){
+      dataset = point_ext_polygon
+      point_ext_polygon_f = rbind(point_ext_polygon_f,dataset)
+      rm(dataset)
+    }
+    else{
+      dataset = point_dans_polygon
+      point_dans_polygon_f = rbind(point_dans_polygon_f,dataset)
+      rm(dataset)
+    }
+  }
+
+  
+  #print("END PHASE 2/2")
+  file.remove(rlist)
+  rm(rlist)
+  
+  # Return of dataframes
+  if(bool == 0){
+    if(!is.null(nrow(point_ext_polygon_f))){
+      EXT <- rep(0, nrow(point_ext_polygon_f))
+      point_ext_polygon_f <- cbind(point_ext_polygon_f,EXT)
+      colnames(point_ext_polygon_f)[2] <- "INT/EXT"
+      return(point_ext_polygon_f)
+    }
+    else{
+      dataframe_vide <- c()
+      return(dataframe_vide)
+    }
+    
+  }
+  else{
+    if(!is.null(nrow(point_dans_polygon_f))){
+      INT <- rep(1, nrow(point_dans_polygon_f))
+      point_dans_polygon_f <- cbind(point_dans_polygon_f,INT)
+      colnames(point_dans_polygon_f)[2] <- "INT/EXT"
+      return(point_dans_polygon_f)
+    }
+    else{
+      dataframe_vide <- c()
+      return(dataframe_vide)
+    }
+  }
+}
+```
+
+
+
+# Function
+# Get the closest point of the nearest polygon for an EXT observation point
+```{r}
+nearest_points_ext <- function(cor_carre_obs,area_sp){
+  
+  if(is.null(nrow(cor_carre_obs))){
+    dataframe_vide <- c()
+    return(dataframe_vide)
+  }
+  
+  # Conversion to Lambert coordinates
+  polygon_Lambert <- st_transform(area_sp,2154)
+  
+  # Initialisation
+  nearest_polygon <- c()
+  pourcent <- ceiling(nrow(cor_carre_obs)/100)
+  j <- c()
+
+  #print("START PHASE 1/2")
+
+  for(i in 1:nrow(cor_carre_obs)){
+    if(i%%(pourcent*10) == 0 && i!=nrow(cor_carre_obs)){
+      #print(paste(ceiling(i/pourcent),"%", sep =""))
+      save(nearest_polygon, file = paste("Test_",ceiling(i/pourcent)/10,".Rda",sep=""))
+      rm(nearest_polygon)
+      nearest_polygon <- c()
+      j <- c(j,ceiling(i/pourcent)/10)
+    }
+    carre <- cor_carre_obs[i,]$cor_carre
+    indice <- st_nearest_feature(carre,polygon_Lambert)
+    linestring <- st_nearest_points(carre,polygon_Lambert[indice,])
+    point_pol <- st_cast(linestring, "POINT")[2]
+    distance <- st_distance(carre,point_pol)
+    units(distance) <- with(ud_units, km)
+    distance <- round(distance,2)
+    row = st_sf(point_pol=point_pol, id_polygon=polygon_Lambert[indice,]$id_polygone, polygon=polygon_Lambert[indice,]$geometry, area=polygon_Lambert[indice,]$area, length=polygon_Lambert[indice,]$lenght, distance=distance)
+    nearest_polygon <- rbind(nearest_polygon,row)
+    if(i == nrow(cor_carre_obs)){
+      #print("100%")
+      save(nearest_polygon, file = paste("Test_",10,".Rda",sep=""))
+      rm(nearest_polygon)
+      j <- c(j,10)
+    }
+  }
+  
+  #print("END PHASE 1/2")
+  
+  rlist <- c()
+  #print("START PHASE 2/2")
+  
+  nearest_polygon_f <- c()
+  
+  for(i in j){
+    #print(paste(i*10,"%", sep =""))
+    load(paste("Test_",i,".Rda",sep=""))
+    rlist <- c(rlist,(paste("Test_",i,".Rda",sep=""))) 
+    nearest_polygon_f = rbind(nearest_polygon_f,nearest_polygon)
+  }
+  
+  
+  #print("END PHASE 2/2")
+  file.remove(rlist)
+  rm(rlist)
+  
+  
+
+  # Merging tables
+  data <- cbind(cor_carre_obs,nearest_polygon_f)
+  
+  # Delete lines with edges without coordinates
+  datatable <- subset(data,id_polygon != "NA")
+  return(datatable)
+}
+```
+
+
+
+# Function
+# Get the closest point of the nearest polygon for an IN observation point
+# -> Need to cast POLYGON in LINESTRING
+```{r}
+nearest_points_int <- function(cor_carre_obs,area_sp){
+  
+  if(is.null(nrow(cor_carre_obs))){
+    dataframe_vide <- c()
+    return(dataframe_vide)
+  }
+  
+  # Conversion to Lambert coordinates
+  polygon_Lambert <- st_transform(area_sp,2154)
+  
+  # Initialisation
+  nearest_polygon <- c()
+  pourcent <- ceiling(nrow(cor_carre_obs)/100)
+  j <- c()
+
+  #print("START PHASE 1/2")
+
+  for(i in 1:nrow(cor_carre_obs)){
+    if(i%%(pourcent*10) == 0 && i!=nrow(cor_carre_obs)){
+      #print(paste(ceiling(i/pourcent),"%", sep =""))
+      save(nearest_polygon, file = paste("Test_",ceiling(i/pourcent)/10,".Rda",sep=""))
+      rm(nearest_polygon)
+      nearest_polygon <- c()
+      j <- c(j,ceiling(i/pourcent)/10)
+    }
+    carre <- cor_carre_obs[i,]$cor_carre
+    indice <- st_nearest_feature(carre,polygon_Lambert)
+    test <- try(polygon <- st_geometry(polygon_Lambert[indice,])  %>% st_cast(to = 'LINESTRING'), silent = T)
+    if(class(test)[1] == "try-error"){
+      print("Error cast MULTIPOLYGON TO LINESTRING")
+    }
+    linestring <- st_nearest_points(carre,polygon)
+    point_pol <- st_cast(linestring, "POINT")[2]
+    distance <- st_distance(carre,polygon)
+    units(distance) <- with(ud_units, km)
+    distance <- round(distance,2)
+    row = st_sf(point_pol=point_pol, id_polygon=polygon_Lambert[indice,]$id_polygone, polygon=polygon_Lambert[indice,]$geometry, area=polygon_Lambert[indice,]$area, length=polygon_Lambert[indice,]$lenght, distance=distance)
+    nearest_polygon <- rbind(nearest_polygon,row)
+    if(i == nrow(cor_carre_obs)){
+      #print("100%")
+      save(nearest_polygon, file = paste("Test_",10,".Rda",sep=""))
+      rm(nearest_polygon)
+      j <- c(j,10)
+    }
+  }
+  
+  #print("END PHASE 1/2")
+  
+  rlist <- c()
+  #print("START PHASE 2/2")
+  
+  nearest_polygon_f <- c()
+  
+  for(i in j){
+    #print(paste(i*10,"%", sep =""))
+    load(paste("Test_",i,".Rda",sep=""))
+    rlist <- c(rlist,(paste("Test_",i,".Rda",sep=""))) 
+    nearest_polygon_f = rbind(nearest_polygon_f,nearest_polygon)
+  }
+  
+  
+  #print("END PHASE 2/2")
+  file.remove(rlist)
+  rm(rlist)
+
+  # Merging tables
+  data <- cbind(cor_carre_obs,nearest_polygon_f)
+  
+  # Delete lines with edges without coordinates
+  datatable <- subset(data,id_polygon != "NA")
+  return(datatable)
+}
+```
+
+
+# Function
+# Get the X,Y cordinates of POL & OBS point
+```{r}
+# Give all the coordinates in Lambert
+get_cordinates <- function(data){
+  
+  cor_obs <- as.data.frame(st_coordinates(data$cor_carre))
+  colnames(cor_obs)[1] <- "X_obs"
+  colnames(cor_obs)[2] <- "Y_obs"
+  
+  cor_pol <- as.data.frame(st_coordinates(data$point_pol))
+  colnames(cor_pol)[1] <- "X_pol"
+  colnames(cor_pol)[2] <- "Y_pol"
+  
+  Segment <- cbind(cor_obs,cor_pol,data$distance)
+  colnames(Segment)[5] <- "distance"
+  
+  return(Segment)
+}
+```
+
+
+
+# Function 
+# return the horizontal distance and vertical distance in absolute value
+```{r}
+distance_h_v_absolue <- function(Segment){
+  
+  distance_horizontale <- data.frame()
+  distance_verticale <- data.frame()
+  signe_horizontal <- c()
+  signe_verticale <- c()
+  
+  for(i in 1:nrow(Segment)){
+    dist_h = round((Segment[i,]$X_obs - Segment[i,]$X_pol)/1000,2)
+    if(dist_h > 0){
+      signe_h = 1
+    }
+    else{
+      signe_h = -1
+      dist_h = dist_h*(-1)
+    }
+    signe_horizontal <- c(signe_horizontal,signe_h)
+    distance_horizontale <- rbind(distance_horizontale,dist_h)
+    dist_v = round((Segment[i,]$Y_obs - Segment[i,]$Y_pol)/1000,2)
+    if(dist_v > 0){
+      signe_v = 1
+    }
+    else{
+      signe_v = -1
+      dist_v = dist_v*(-1)
+    }
+    signe_verticale <- c(signe_verticale,signe_v)
+    
+    distance_verticale <- rbind(distance_verticale,dist_v)
+  }
+
+  dataframe <- cbind(distance_horizontale,signe_horizontal,distance_verticale,signe_verticale)
+  colnames(dataframe)[1] <- "distance_horizontale"
+  colnames(dataframe)[2] <- "signe_horizontale"
+  colnames(dataframe)[3] <- "distance_verticale"
+  colnames(dataframe)[4] <- "signe_verticale"
+  
+  dataframe[,1] <- set_units(dataframe[,1], km)
+  dataframe[,3] <- set_units(dataframe[,3], km)
+  
+  return(dataframe)
+} 
+```
+
+  
+# Run
+# Take approximately 3 hours
+```{r}
+code_sp <- unique(all_obs_STOC$code_sp)
+count = 0
+
+for(species in code_sp){
+  count <- count+1
+  cat("\n",count,"\n",species,"\n")
+  area_sp <- area(species,espece_BL_STOC,BL_all_polygons_F)
+  if(nrow(area_sp) > 0){
+    obs_sp <- observation(species,all_obs_STOC)
+    if(nrow(obs_sp) > 0){
+      carre_obs_sp <- get_carre(obs_sp)
+      carre_int <- position_car_pol(carre_obs_sp,area_sp,1)
+      carre_ext <- position_car_pol(carre_obs_sp,area_sp,0)
+      nearest_pi <- nearest_points_int(carre_int,area_sp)
+      nearest_pe <- nearest_points_ext(carre_ext,area_sp)
+      nearest_points <- rbind(nearest_pi,nearest_pe)
+      nearest_points <- nearest_points[,-9]
+      obs_sp <- obs_sp[,-(6:7)]
+      dataset <- inner_join(obs_sp,nearest_points)
+      cordinates_h_v <- get_cordinates(dataset)
+      distance_h_v <- distance_h_v_absolue(cordinates_h_v)
+      species_dataset <- cbind(dataset,distance_h_v)
+      save(species_dataset, file = paste("Final_",species,"_dataset.Rda",sep=""))
+    }
+    else{
+      print("No STOC observations")
+    }
+  }
+  else{
+    print("No Birdlife polygons")
+  }
+  
+}
+
+
+print("START PHASE 2/2")
+rlist <- c()
+all_species_dataset <- data.frame() 
+sp <- c()
+count = 0
+
+for(species in code_sp){
+  species_dataset = 0
+  try(load(paste("Final_",species,"_dataset.Rda",sep="")),silent = T)
+  if(length(species_dataset) > 2){
+    count <- count+1
+    print(count)
+    print(species)
+    rlist <- c(rlist,(paste("Final_",species,"_dataset.Rda",sep=""))) 
+    all_species_dataset = rbind(all_species_dataset,species_dataset)
+  }
+  else{
+    print(species)
+    sp <- c(sp,species)
+  }
+}
+  
+print("END PHASE 2/2")
+# if you want to remove all the species file:
+#file.remove(rlist)
+```
+
+
+# Save
+```{r}
+save_path = "/Users/Schneider/STAGE_STOC_MNHN/Donnees/"
+save(all_species_dataset, file = paste(save_path,"All_species_dataset.Rda", sep = ""))
+```
+
+
+# Cleaning
+```{r}
+rm(list=ls())
+```
